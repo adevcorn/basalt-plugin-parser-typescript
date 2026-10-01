@@ -112,11 +112,16 @@ const PARSE_QUERY_TSX_SRC: &str = r#"
 const RETRIEVAL_QUERY_SRC: &str = r#"
     (function_declaration name: (_) @name.function) @chunk.function
     (class_declaration name: (_) @name.type) @chunk.type
-    (interface_declaration name: (_) @name.type) @chunk.type
+    (interface_declaration name: (_) @name.interface) @chunk.interface
     (type_alias_declaration name: (_) @name.type) @chunk.type
-    (enum_declaration name: (_) @name.type) @chunk.type
+    (enum_declaration name: (_) @name.enum) @chunk.enum
     (lexical_declaration (variable_declarator name: (_) @name.function value: (arrow_function))) @chunk.function
     (export_statement declaration: (function_declaration name: (_) @name.function)) @chunk.function
+    (export_statement declaration: (class_declaration name: (_) @name.type)) @chunk.type
+    (export_statement declaration: (lexical_declaration (variable_declarator name: (_) @name.function value: (arrow_function)))) @chunk.function
+    (export_statement declaration: (interface_declaration name: (_) @name.interface)) @chunk.interface
+    (export_statement declaration: (type_alias_declaration name: (_) @name.type)) @chunk.type
+    (export_statement declaration: (enum_declaration name: (_) @name.enum)) @chunk.enum
     (module name: (_) @name.module) @chunk.module
 "#;
 
@@ -223,14 +228,21 @@ fn scope_id_for(name: &str) -> u8 {
 
 fn kind_byte(k: &str) -> u8 {
     match k {
-        "module"   => 1,
-        "type"     => 2,
-        "function" => 3,
-        _          => 0,
+        "module"    => 1, // SEMANTIC_NODE_MODULE
+        "type"      => 2, // SEMANTIC_NODE_TYPE
+        "function"  => 3, // SEMANTIC_NODE_FUNCTION
+        "interface" => 7, // SEMANTIC_NODE_INTERFACE
+        "enum"      => 6, // SEMANTIC_NODE_ENUM_CASE (repurposed for enum decl)
+        _           => 0,
     }
 }
 
 // ── exports ──────────────────────────────────────────────────────────────────
+
+/// Aliases registered with the host's extension→plugin map.
+/// Format: null-terminated string of "alias:canonical\n" lines.
+/// This causes the host to route .tsx files through this ts.wasm plugin.
+static EXT_ALIASES: &[u8] = b"tsx:ts\nmts:ts\ncts:ts\n\0";
 
 #[no_mangle]
 pub extern "C" fn basalt_lang() -> i32 {
@@ -240,6 +252,11 @@ pub extern "C" fn basalt_lang() -> i32 {
 #[no_mangle]
 pub extern "C" fn basalt_lang_tsx() -> i32 {
     LANG_EXT_TSX.as_ptr() as i32
+}
+
+#[no_mangle]
+pub extern "C" fn basalt_ext_aliases() -> i32 {
+    EXT_ALIASES.as_ptr() as i32
 }
 
 #[no_mangle]
