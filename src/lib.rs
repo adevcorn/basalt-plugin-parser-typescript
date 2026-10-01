@@ -34,7 +34,7 @@ const PARSE_QUERY_SRC: &str = r#"
     "function" @keyword "return" @keyword
     "async" @keyword "await" @keyword
     "extends" @keyword "implements" @keyword
-    "new" @keyword "this" @keyword
+    "new" @keyword (this) @keyword
     "typeof" @keyword "keyof" @keyword
     "in" @keyword "of" @keyword "instanceof" @keyword
     "yield" @keyword "throw" @keyword
@@ -47,7 +47,7 @@ const PARSE_QUERY_SRC: &str = r#"
     "enum" @keyword "declare" @keyword "abstract" @keyword
     "readonly" @keyword "override" @keyword "static" @keyword
     "public" @keyword "private" @keyword "protected" @keyword
-    "null" @keyword "undefined" @keyword "true" @keyword "false" @keyword
+    (null) @keyword (undefined) @keyword (true) @keyword (false) @keyword
     (string) @string
     (template_string) @string
     (number) @number
@@ -58,7 +58,7 @@ const PARSE_QUERY_SRC: &str = r#"
     (method_definition name: (property_identifier) @function)
     (variable_declarator name: (identifier) value: (arrow_function) @function)
     (variable_declarator name: (identifier) @variable)
-    (formal_parameters (identifier) @variable)
+    (required_parameter (identifier) @variable)
     "+" @operator "-" @operator "*" @operator "/" @operator
     "%" @operator "=" @operator "+=" @operator "-=" @operator
     "==" @operator "!=" @operator "<" @operator ">" @operator
@@ -74,7 +74,7 @@ const PARSE_QUERY_TSX_SRC: &str = r#"
     "function" @keyword "return" @keyword
     "async" @keyword "await" @keyword
     "extends" @keyword "implements" @keyword
-    "new" @keyword "this" @keyword
+    "new" @keyword (this) @keyword
     "typeof" @keyword "keyof" @keyword
     "in" @keyword "of" @keyword "instanceof" @keyword
     "yield" @keyword "throw" @keyword
@@ -87,7 +87,7 @@ const PARSE_QUERY_TSX_SRC: &str = r#"
     "enum" @keyword "declare" @keyword "abstract" @keyword
     "readonly" @keyword "override" @keyword "static" @keyword
     "public" @keyword "private" @keyword "protected" @keyword
-    "null" @keyword "undefined" @keyword "true" @keyword "false" @keyword
+    (null) @keyword (undefined) @keyword (true) @keyword (false) @keyword
     (string) @string
     (template_string) @string
     (number) @number
@@ -98,7 +98,7 @@ const PARSE_QUERY_TSX_SRC: &str = r#"
     (method_definition name: (property_identifier) @function)
     (variable_declarator name: (identifier) value: (arrow_function) @function)
     (variable_declarator name: (identifier) @variable)
-    (formal_parameters (identifier) @variable)
+    (required_parameter (identifier) @variable)
     "+" @operator "-" @operator "*" @operator "/" @operator
     "%" @operator "=" @operator "+=" @operator "-=" @operator
     "==" @operator "!=" @operator "<" @operator ">" @operator
@@ -115,13 +115,23 @@ const RETRIEVAL_QUERY_SRC: &str = r#"
     (interface_declaration name: (_) @name.interface) @chunk.interface
     (type_alias_declaration name: (_) @name.type) @chunk.type
     (enum_declaration name: (_) @name.enum) @chunk.enum
+    (method_definition name: (_) @name.function) @chunk.function
     (lexical_declaration (variable_declarator name: (_) @name.function value: (arrow_function))) @chunk.function
+    (lexical_declaration (variable_declarator name: (_) @name.property)) @chunk.property
+    (variable_declaration (variable_declarator name: (_) @name.property)) @chunk.property
     (export_statement declaration: (function_declaration name: (_) @name.function)) @chunk.function
     (export_statement declaration: (class_declaration name: (_) @name.type)) @chunk.type
     (export_statement declaration: (lexical_declaration (variable_declarator name: (_) @name.function value: (arrow_function)))) @chunk.function
+    (export_statement declaration: (lexical_declaration (variable_declarator name: (_) @name.property))) @chunk.property
+    (export_statement declaration: (variable_declaration (variable_declarator name: (_) @name.property))) @chunk.property
     (export_statement declaration: (interface_declaration name: (_) @name.interface)) @chunk.interface
     (export_statement declaration: (type_alias_declaration name: (_) @name.type)) @chunk.type
     (export_statement declaration: (enum_declaration name: (_) @name.enum)) @chunk.enum
+    (export_statement value: (call_expression function: (identifier) @name.function)) @chunk.function
+    (export_statement value: (call_expression function: (member_expression property: (property_identifier) @name.function))) @chunk.function
+    (export_statement value: (object) @name.property) @chunk.property
+    (expression_statement (call_expression function: (identifier) @name.function arguments: (arguments [(string) (template_string)] @name.function))) @chunk.function
+    (expression_statement (call_expression function: (member_expression object: (identifier) @name.function property: (property_identifier) @name.function) arguments: (arguments [(string) (template_string)] @name.function))) @chunk.function
     (module name: (_) @name.module) @chunk.module
 "#;
 
@@ -159,15 +169,24 @@ unsafe fn get_state() -> Option<&'static mut ParserState> {
         let mut parser = Parser::new();
         parser.set_language(lang).ok()?;
 
-        let parse_query = Query::new(lang, PARSE_QUERY_SRC).ok()?;
+        let parse_query = match Query::new(lang, PARSE_QUERY_SRC) {
+            Ok(q) => q,
+            Err(e) => { eprintln!("PARSE_QUERY error: {e:?}"); return None; }
+        };
         let parse_cap_names: Vec<String> =
             parse_query.capture_names().iter().map(|s| s.to_string()).collect();
 
-        let retrieval_query = Query::new(lang, RETRIEVAL_QUERY_SRC).ok()?;
+        let retrieval_query = match Query::new(lang, RETRIEVAL_QUERY_SRC) {
+            Ok(q) => q,
+            Err(e) => { eprintln!("RETRIEVAL_QUERY error: {e:?}"); return None; }
+        };
         let retrieval_cap_names: Vec<String> =
             retrieval_query.capture_names().iter().map(|s| s.to_string()).collect();
 
-        let call_sites_query = Query::new(lang, CALL_SITES_QUERY_SRC).ok()?;
+        let call_sites_query = match Query::new(lang, CALL_SITES_QUERY_SRC) {
+            Ok(q) => q,
+            Err(e) => { eprintln!("CALL_SITES_QUERY error: {e:?}"); return None; }
+        };
 
         STATE = Some(ParserState {
             parser,
@@ -187,15 +206,24 @@ unsafe fn get_state_tsx() -> Option<&'static mut TsxParserState> {
         let mut parser = Parser::new();
         parser.set_language(lang).ok()?;
 
-        let parse_query = Query::new(lang, PARSE_QUERY_TSX_SRC).ok()?;
+        let parse_query = match Query::new(lang, PARSE_QUERY_TSX_SRC) {
+            Ok(q) => q,
+            Err(e) => { eprintln!("PARSE_QUERY_TSX error: {e:?}"); return None; }
+        };
         let parse_cap_names: Vec<String> =
             parse_query.capture_names().iter().map(|s| s.to_string()).collect();
 
-        let retrieval_query = Query::new(lang, RETRIEVAL_QUERY_SRC).ok()?;
+        let retrieval_query = match Query::new(lang, RETRIEVAL_QUERY_SRC) {
+            Ok(q) => q,
+            Err(e) => { eprintln!("RETRIEVAL_QUERY_TSX error: {e:?}"); return None; }
+        };
         let retrieval_cap_names: Vec<String> =
             retrieval_query.capture_names().iter().map(|s| s.to_string()).collect();
 
-        let call_sites_query = Query::new(lang, CALL_SITES_QUERY_SRC).ok()?;
+        let call_sites_query = match Query::new(lang, CALL_SITES_QUERY_SRC) {
+            Ok(q) => q,
+            Err(e) => { eprintln!("CALL_SITES_QUERY_TSX error: {e:?}"); return None; }
+        };
 
         STATE_TSX = Some(TsxParserState {
             parser,
@@ -231,8 +259,9 @@ fn kind_byte(k: &str) -> u8 {
         "module"    => 1, // SEMANTIC_NODE_MODULE
         "type"      => 2, // SEMANTIC_NODE_TYPE
         "function"  => 3, // SEMANTIC_NODE_FUNCTION
-        "interface" => 7, // SEMANTIC_NODE_INTERFACE
+        "property"  => 5, // SEMANTIC_NODE_PROPERTY
         "enum"      => 6, // SEMANTIC_NODE_ENUM_CASE (repurposed for enum decl)
+        "interface" => 7, // SEMANTIC_NODE_INTERFACE
         _           => 0,
     }
 }
